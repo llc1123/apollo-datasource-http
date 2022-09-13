@@ -1,14 +1,5 @@
 # Apollo HTTP Data Source
 
-[![CI](https://github.com/StarpTech/apollo-datasource-http/actions/workflows/ci.yml/badge.svg)](https://github.com/StarpTech/apollo-datasource-http/actions/workflows/ci.yml)
-
----
-
-> **Note**: Are you looking for the next generation API Developer Platform? 🔎 Have a look at: [WunderGraph](https://github.com/wundergraph/wundergraph)
-Turn your services, databases and 3rd party APIs into a secure unified API in just a few minutes. 🪄
-
----
-
 Optimized JSON HTTP Data Source for Apollo Server
 
 - Uses [Undici](https://github.com/nodejs/undici) under the hood. It's around `60%` faster than `apollo-datasource-rest`
@@ -22,10 +13,10 @@ View the [Apollo Server documentation for data sources](https://www.apollographq
 
 ## Usage
 
-To get started, install the `apollo-datasource-http` package:
+To get started, install the `@llc1123/apollo-datasource-http` package:
 
 ```bash
-npm install apollo-datasource-http
+npm install @llc1123/apollo-datasource-http
 ```
 
 To define a data source, extend the [`HTTPDataSource`](./src/http-data-source.ts) class and implement the data fetching methods that your resolvers require. Data sources can then be provided via the `dataSources` property to the `ApolloServer` constructor, as demonstrated in the section below.
@@ -50,7 +41,7 @@ Your implementation of these methods can call on convenience methods built into 
 
 ```ts
 import { Pool } from 'undici'
-import { HTTPDataSource } from 'apollo-datasource-http'
+import { HTTPDataSource } from '@llc1123/apollo-datasource-http'
 
 const datasource = new (class MoviesAPI extends HTTPDataSource {
   constructor(baseURL: string, pool: Pool) {
@@ -134,25 +125,6 @@ const datasource = new (class MoviesAPI extends HTTPDataSource {
 ## Error handling
 
 The http client throws for unsuccessful responses (statusCode >= 400). In case of an request error `onError` is executed. By default the error is rethrown as a `ApolloError` to avoid exposing sensible information.
-
-## Benchmark
-
-See [README.md](benchmarks/README.md)
-
-## Production checklist
-
-This setup is in use with Redis. If you use Redis ensure that limits are set:
-
-```
-maxmemory 10mb
-maxmemory-policy allkeys-lru
-```
-
-This will limit the cache to 10MB and removes the least recently used keys from the cache.
-
-## Versioning
-
-We follow [semver](https://semver.org/). Major version zero (0.y.z) is for initial development. Anything MAY change at any time. The public API **SHOULD NOT** be considered stable ([source](https://semver.org/#spec-item-4)).
 
 ## Node.js support
 
