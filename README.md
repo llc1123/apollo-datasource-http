@@ -3,9 +3,8 @@
 Optimized JSON HTTP Data Source for Apollo Server
 
 - Uses [Undici](https://github.com/nodejs/undici) under the hood. It's around `60%` faster than `apollo-datasource-rest`
-- Request Deduplication (LRU), Request Cache (TTL) and `stale-if-error` Cache (TTL)
+- Request Deduplication (LRU)
 - Support [AbortController ](https://github.com/mysticatea/abort-controller) to manually cancel all running requests
-- Support for [Apollo Cache Storage backend](https://www.apollographql.com/docs/apollo-server/data/data-sources/#using-memcachedredis-as-a-cache-storage-backend)
 
 ## Documentation
 
@@ -105,10 +104,6 @@ const datasource = new (class MoviesAPI extends HTTPDataSource {
       },
       headers: {
         'X-Foo': 'bar',
-      },
-      requestCache: {
-        maxTtl: 10 * 60, // 10min, will respond for 10min with the cached result (updated every 10min)
-        maxTtlIfError: 30 * 60, // 30min, will respond with the cached response in case of an error (for further 20min)
       },
     })
   }

@@ -1,15 +1,12 @@
-import { DataSource, DataSourceConfig } from 'apollo-datasource'
-import { Pool } from 'undici'
 import { STATUS_CODES } from 'http'
-import QuickLRU from '@alloc/quick-lru'
-import { createUnzip, createBrotliDecompress } from 'zlib'
-import streamToPromise from 'stream-to-promise'
-import { KeyValueCache } from 'apollo-server-caching'
-import Dispatcher, { HttpMethod, ResponseData } from 'undici/types/dispatcher'
-import { toApolloError } from 'apollo-server-errors'
 import { EventEmitter } from 'stream'
+
+import QuickLRU from '@alloc/quick-lru'
+import { DataSource, DataSourceConfig } from 'apollo-datasource'
+import { toApolloError } from 'apollo-server-errors'
 import { Logger } from 'apollo-server-types'
-import { URLSearchParams } from 'url'
+import { Pool } from 'undici'
+import Dispatcher, { HttpMethod, ResponseData } from 'undici/types/dispatcher'
 
 type AbortSignal = unknown
 
@@ -25,20 +22,14 @@ export class RequestError<T = unknown> extends Error {
   }
 }
 
-export type CacheTTLOptions = {
-  requestCache?: {
-    // The maximum time an item is cached in seconds.
-    maxTtl: number
-    // The maximum time the cache should be used when the re-fetch from the origin fails.
-    maxTtlIfError: number
-  }
-}
-
 interface Dictionary<T> {
   [Key: string]: T | undefined
 }
 
-export type RequestOptions = Omit<Partial<Request>, 'origin' | 'path' | 'method'>
+export type RequestOptions = Omit<
+  Partial<Request>,
+  'origin' | 'path' | 'method'
+>
 
 export type Request<T = unknown> = {
   context: Dictionary<string>
@@ -52,7 +43,7 @@ export type Request<T = unknown> = {
   // Indicates if the response of this request should be memoized
   memoize?: boolean
   headers: Dictionary<string>
-} & CacheTTLOptions
+}
 
 export type Response<TResult> = {
   body: TResult
@@ -84,15 +75,18 @@ const statusCodeCacheableByDefault = new Set([200, 203])
  * HTTPDataSource is an optimized HTTP Data Source for Apollo Server
  * It focus on reliability and performance.
  */
-export abstract class HTTPDataSource<TContext = any> extends DataSource {
+export abstract class HTTPDataSource<TContext = unknown> extends DataSource {
   public context!: TContext
   private pool: Pool
   private logger?: Logger
-  private cache!: KeyValueCache<string>
   private globalRequestOptions?: RequestOptions
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private readonly memoizedResults: QuickLRU<string, Promise<Response<any>>>
 
-  constructor(public readonly baseURL: string, private readonly options?: HTTPDataSourceOptions) {
+  constructor(
+    public readonly baseURL: string,
+    private readonly options?: HTTPDataSourceOptions,
+  ) {
     super()
     this.memoizedResults = new QuickLRU({
       // The maximum number of items before evicting the least recently used items.
@@ -130,7 +124,6 @@ export abstract class HTTPDataSource<TContext = any> extends DataSource {
    */
   initialize(config: DataSourceConfig<TContext>): void {
     this.context = config.context
-    this.cache = config.cache
   }
 
   protected isResponseOk(statusCode: number): boolean {
@@ -141,7 +134,10 @@ export abstract class HTTPDataSource<TContext = any> extends DataSource {
     request: Request,
     response: Response<TResult>,
   ): boolean {
-    return statusCodeCacheableByDefault.has(response.statusCode) && this.isRequestCacheable(request)
+    return (
+      statusCodeCacheableByDefault.has(response.statusCode) &&
+      this.isRequestCacheable(request)
+    )
   }
 
   protected isRequestCacheable(request: Request): boolean {
@@ -195,7 +191,9 @@ export abstract class HTTPDataSource<TContext = any> extends DataSource {
     }
 
     throw new RequestError(
-      `Response code ${response.statusCode} (${STATUS_CODES[response.statusCode.toString()]})`,
+      `Response code ${response.statusCode} (${
+        STATUS_CODES[response.statusCode.toString()]
+      })`,
       response.statusCode,
       request,
       response,
@@ -299,57 +297,23 @@ export abstract class HTTPDataSource<TContext = any> extends DataSource {
     const headers = response.headers
     const contentType = headers['content-type']
     const contentLength = headers['content-length']
-    const contentEncoding = headers['content-encoding']
 
-    let dataBuffer: Buffer
-
-    switch (contentEncoding) {
-      case 'br':
-        dataBuffer = await streamToPromise(body.pipe(createBrotliDecompress()))
-        break
-      case 'gzip':
-      case 'deflate':
-        dataBuffer = await streamToPromise(body.pipe(createUnzip()))
-        break
-      default:
-        dataBuffer = await streamToPromise(body)
-        break
-    }
-
-    let data = dataBuffer.toString('utf-8')
-
-    // can we parse it as JSON?
     if (
       statusCode !== 204 &&
       contentLength !== '0' &&
       contentType &&
-      (contentType.startsWith('application/json') || contentType.endsWith('+json'))
+      (contentType.startsWith('application/json') ||
+        contentType.endsWith('+json'))
     ) {
-      return JSON.parse(data)
+      return body.json()
     } else {
-      return data as unknown as T
+      return body.text() as Promise<T>
     }
   }
 
   private async performRequest<TResult>(
     request: Request,
-    cacheKey: string,
   ): Promise<Response<TResult>> {
-    const requestIsCacheable = this.isRequestCacheable(request)
-
-    // try to get response from cache
-    if (requestIsCacheable) {
-      try {
-        const cacheItem = await this.cache.get(cacheKey)
-        if (cacheItem) {
-          const cachedResponse: Response<TResult> = JSON.parse(cacheItem)
-          return { ...cachedResponse, isFromCache: true }
-        }
-      } catch (error: any) {
-        this.logger?.error(`Cache item '${cacheKey}' could not be loaded: ${error.message}`)
-      }
-    }
-
     try {
       // do the request
       if (request.body !== null && typeof request.body === 'object') {
@@ -384,40 +348,17 @@ export abstract class HTTPDataSource<TContext = any> extends DataSource {
 
       this.onResponse<TResult>(request, response)
 
-      if (request.requestCache && this.isResponseCacheable<TResult>(request, response)) {
-        response.maxTtl = request.requestCache.maxTtl
-        const cachedResponse = JSON.stringify(response)
-        this.cache
-          .set(cacheKey, cachedResponse, {
-            ttl: request.requestCache.maxTtl,
-          })
-          .catch((err) => this.logger?.error(err))
-        this.cache
-          .set(`staleIfError:${cacheKey}`, cachedResponse, {
-            ttl: request.requestCache.maxTtl + request.requestCache.maxTtlIfError,
-          })
-          .catch((err) => this.logger?.error(err))
-      }
-
       return response
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (error: any) {
       this.onError?.(error, request)
-
-      // in case of an error we try to respond with a stale result from the stale-if-error cache
-      if (request.requestCache) {
-        const cacheItem = await this.cache.get(`staleIfError:${cacheKey}`)
-
-        if (cacheItem) {
-          const response: Response<TResult> = JSON.parse(cacheItem)
-          return { ...response, isFromCache: true }
-        }
-      }
-
       throw toApolloError(error)
     }
   }
 
-  private async request<TResult = unknown>(request: Request): Promise<Response<TResult>> {
+  private async request<TResult = unknown>(
+    request: Request,
+  ): Promise<Response<TResult>> {
     const options: Request = {
       ...this.globalRequestOptions,
       ...request,
@@ -443,17 +384,22 @@ export abstract class HTTPDataSource<TContext = any> extends DataSource {
       if (promise) {
         return { ...(await promise), memoized: true }
       }
-      promise = this.trace(options, () => this.performRequest<TResult>(options, cacheKey))
+      promise = this.trace(options, () => this.performRequest<TResult>(options))
       this.memoizedResults.set(cacheKey, promise)
       return promise
     } else {
       this.memoizedResults.delete(cacheKey)
-      const promise = this.trace(options, () => this.performRequest<TResult>(options, cacheKey))
+      const promise = this.trace(options, () =>
+        this.performRequest<TResult>(options),
+      )
       return promise
     }
   }
 
-  protected async trace<TResult>(request: Request, fn: () => Promise<TResult>): Promise<TResult> {
+  protected async trace<TResult>(
+    request: Request,
+    fn: () => Promise<TResult>,
+  ): Promise<TResult> {
     if (process.env.NODE_ENV === 'development') {
       const startTime = Date.now()
       try {
@@ -461,7 +407,8 @@ export abstract class HTTPDataSource<TContext = any> extends DataSource {
       } finally {
         const duration = Date.now() - startTime
         const label = `${request.method || 'GET'} ${request.path}`
-        this.logger?.debug(`${label} (${duration}ms)`)
+        // eslint-disable-next-line no-console
+        console.debug(`${label} (${duration}ms)`)
       }
     } else {
       return fn()
